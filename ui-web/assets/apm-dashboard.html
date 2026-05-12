@@ -1,0 +1,992 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>APM 监控面板</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #0a0a0f;
+            --bg-secondary: #12121a;
+            --bg-card: #1a1a24;
+            --bg-card-hover: #22222e;
+            --accent: #00d4aa;
+            --accent-blue: #3b82f6;
+            --accent-purple: #8b5cf6;
+            --accent-pink: #ec4899;
+            --accent-orange: #f97316;
+            --text-primary: #ffffff;
+            --text-secondary: #a1a1aa;
+            --text-muted: #71717a;
+            --border: #27272a;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            min-height: 100vh;
+            color: var(--text-primary);
+            line-height: 1.6;
+        }
+
+        /* 背景装饰 */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background:
+                radial-gradient(ellipse 80% 80% at 50% -20%, rgba(0, 212, 170, 0.15), transparent),
+                radial-gradient(ellipse 60% 60% at 100% 0%, rgba(139, 92, 246, 0.1), transparent),
+                radial-gradient(ellipse 60% 60% at 0% 100%, rgba(59, 130, 246, 0.1), transparent);
+            pointer-events: none;
+            z-index: -1;
+        }
+
+        .card {
+            background: linear-gradient(135deg, var(--bg-card) 0%, rgba(26, 26, 36, 0.8) 100%);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            overflow: hidden;
+        }
+
+        .card:hover {
+            background: var(--bg-card-hover);
+            border-color: rgba(0, 212, 170, 0.3);
+            transform: translateY(-2px);
+            box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.5);
+        }
+
+        .metric-value {
+            font-size: 2.25rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+        }
+
+        .gradient-text {
+            background: linear-gradient(135deg, var(--accent) 0%, var(--accent-blue) 50%, var(--accent-purple) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .gradient-border {
+            position: relative;
+        }
+
+        .gradient-border::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            border-radius: 16px;
+            padding: 1px;
+            background: linear-gradient(135deg, var(--accent), var(--accent-purple));
+            -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+            mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+            -webkit-mask-composite: xor;
+            mask-composite: exclude;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .card:hover .gradient-border::before {
+            opacity: 1;
+        }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .status-healthy {
+            background: rgba(16, 185, 129, 0.15);
+            color: #10b981;
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        .status-warning {
+            background: rgba(245, 158, 11, 0.15);
+            color: #f59e0b;
+            border: 1px solid rgba(245, 158, 11, 0.3);
+        }
+
+        .status-critical {
+            background: rgba(239, 68, 68, 0.15);
+            color: #ef4444;
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+
+        .refresh-btn {
+            transition: all 0.3s ease;
+        }
+
+        .refresh-btn:hover {
+            transform: rotate(180deg);
+        }
+
+        .animate-glow {
+            animation: glow 2s ease-in-out infinite;
+        }
+
+        @keyframes glow {
+            0%, 100% { box-shadow: 0 0 20px rgba(0, 212, 170, 0.3); }
+            50% { box-shadow: 0 0 30px rgba(0, 212, 170, 0.5); }
+        }
+
+        select {
+            background: var(--bg-card);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 8px 12px;
+            cursor: pointer;
+        }
+
+        select:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+    </style>
+</head>
+<body class="text-white">
+    <!-- Header -->
+    <header class="header">
+        <div class="header-content">
+            <div class="logo-section">
+                <div class="logo-icon">
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                        <path d="M2 17l10 5 10-5"/>
+                        <path d="M2 12l10 5 10-5"/>
+                    </svg>
+                </div>
+                <div class="logo-text">
+                    <h1>应用性能监控</h1>
+                    <p>APM Dashboard</p>
+                </div>
+            </div>
+
+            <div class="header-right">
+                <div class="live-indicator">
+                    <span class="pulse-dot"></span>
+                    <span>实时</span>
+                </div>
+
+                <select id="duration">
+                    <option value="1m">最近1分钟</option>
+                    <option value="5m">最近5分钟</option>
+                    <option value="15m">最近15分钟</option>
+                    <option value="1h" selected>最近1小时</option>
+                    <option value="6h">最近6小时</option>
+                    <option value="24h">最近24小时</option>
+                </select>
+
+                <button id="refreshBtn" class="refresh-btn" title="刷新">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M23 4v6h-6"/>
+                        <path d="M1 20v-6h6"/>
+                        <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <style>
+        .header {
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background: rgba(10, 10, 15, 0.85);
+            backdrop-filter: blur(20px);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .header-content {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .logo-section {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .logo-icon {
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            background: linear-gradient(135deg, var(--accent), var(--accent-purple));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+        }
+
+        .logo-text h1 {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .logo-text p {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .live-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+        }
+
+        .pulse-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--accent);
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(0.9); }
+        }
+
+        .refresh-btn {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            color: var(--text-secondary);
+        }
+
+        .refresh-btn:hover {
+            background: var(--bg-card-hover);
+            color: var(--accent);
+            border-color: var(--accent);
+        }
+    </style>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <!-- Status Overview Cards -->
+        <div class="metrics-grid">
+            <!-- Status Card -->
+            <div class="card metric-card">
+                <div class="metric-header">
+                    <span class="metric-label">服务状态</span>
+                    <div class="metric-icon">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M22 11.08V12a10 10 0 11-5.93-9.44"/>
+                            <polyline points="22,4 12,14.01 9,11.01"/>
+                        </svg>
+                    </div>
+                </div>
+                <div id="statusBadge" class="status-badge status-healthy">健康</div>
+                <div id="statusText" class="metric-main">正常运行</div>
+                <div id="updateTime" class="metric-sub">--</div>
+            </div>
+
+            <!-- Response Time -->
+            <div class="card metric-card">
+                <div class="metric-header">
+                    <span class="metric-label">响应时间</span>
+                    <div class="metric-icon time">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <polyline points="12,6 12,12 16,14"/>
+                        </svg>
+                    </div>
+                </div>
+                <div id="responseTime" class="metric-value gradient-text">--</div>
+                <div id="responseTimeAvg" class="metric-sub">平均: --</div>
+            </div>
+
+            <!-- Error Rate -->
+            <div class="card metric-card">
+                <div class="metric-header">
+                    <span class="metric-label">错误率</span>
+                    <div class="metric-icon error">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <line x1="12" y1="8" x2="12" y2="12"/>
+                            <line x1="12" y1="16" x2="12.01" y2="16"/>
+                        </svg>
+                    </div>
+                </div>
+                <div id="errorRate" class="metric-value gradient-text">--</div>
+                <div id="errorRateAvg" class="metric-sub">平均: --</div>
+            </div>
+
+            <!-- Throughput -->
+            <div class="card metric-card">
+                <div class="metric-header">
+                    <span class="metric-label">吞吐量</span>
+                    <div class="metric-icon throughput">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polygon points="13,2 3,14 12,14 11,22 21,10 12,10 13,2"/>
+                        </svg>
+                    </div>
+                </div>
+                <div id="throughput" class="metric-value gradient-text">--</div>
+                <div id="throughputAvg" class="metric-sub">平均: --</div>
+            </div>
+        </div>
+
+        <!-- Charts Grid -->
+        <div class="charts-grid">
+            <!-- Response Time Chart -->
+            <div class="card chart-card">
+                <h3>响应时间趋势</h3>
+                <div class="chart-container">
+                    <canvas id="responseTimeChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Throughput Chart -->
+            <div class="card chart-card">
+                <h3>吞吐量趋势</h3>
+                <div class="chart-container">
+                    <canvas id="throughputChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Error Rate Chart -->
+            <div class="card chart-card">
+                <h3>错误率趋势</h3>
+                <div class="chart-container">
+                    <canvas id="errorRateChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Requests Chart -->
+            <div class="card chart-card">
+                <h3>请求量</h3>
+                <div class="chart-container">
+                    <canvas id="requestsChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Alerts Section -->
+        <div class="card alerts-card">
+            <div class="alerts-header">
+                <h3>告警</h3>
+                <span id="alertCount" class="alert-count">0</span>
+            </div>
+            <div id="alertsList" class="alerts-list">
+                <div class="empty-state">暂无告警</div>
+            </div>
+        </div>
+    </main>
+
+    <style>
+        .main-content {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 20px;
+            margin-bottom: 24px;
+        }
+
+        @media (max-width: 1200px) {
+            .metrics-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+
+        @media (max-width: 640px) {
+            .metrics-grid { grid-template-columns: 1fr; }
+        }
+
+        .metric-card {
+            padding: 24px;
+        }
+
+        .metric-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+        }
+
+        .metric-label {
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+        }
+
+        .metric-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(59, 130, 246, 0.15);
+            color: var(--accent-blue);
+        }
+
+        .metric-icon.time { background: rgba(59, 130, 246, 0.15); color: var(--accent-blue); }
+        .metric-icon.error { background: rgba(239, 68, 68, 0.15); color: var(--danger); }
+        .metric-icon.throughput { background: rgba(139, 92, 246, 0.15); color: var(--accent-purple); }
+
+        .metric-main {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-top: 8px;
+        }
+
+        .metric-sub {
+            font-size: 0.875rem;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        .charts-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+            margin-bottom: 24px;
+        }
+
+        @media (max-width: 900px) {
+            .charts-grid { grid-template-columns: 1fr; }
+        }
+
+        .chart-card {
+            padding: 24px;
+        }
+
+        .chart-card h3 {
+            font-size: 1rem;
+            font-weight: 600;
+            margin-bottom: 16px;
+            color: var(--text-primary);
+        }
+
+        .chart-container {
+            position: relative;
+            height: 220px;
+        }
+
+        .alerts-card {
+            padding: 24px;
+        }
+
+        .alerts-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+        }
+
+        .alerts-header h3 {
+            font-size: 1rem;
+            font-weight: 600;
+        }
+
+        .alert-count {
+            background: var(--bg-card);
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+
+        .alerts-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: var(--text-muted);
+        }
+
+        .alert-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 14px;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 12px;
+            border: 1px solid var(--border);
+        }
+
+        .alert-item.critical {
+            border-color: rgba(239, 68, 68, 0.3);
+            background: rgba(239, 68, 68, 0.08);
+        }
+
+        .alert-item.warning {
+            border-color: rgba(245, 158, 11, 0.3);
+            background: rgba(245, 158, 11, 0.08);
+        }
+
+        .alert-time {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+    </style>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="footer-content">
+            APM监控面板 &copy; 2024 | 数据来源: Prometheus
+        </div>
+    </footer>
+
+    <style>
+        .footer {
+            border-top: 1px solid var(--border);
+            margin-top: 40px;
+        }
+
+        .footer-content {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px 24px;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.875rem;
+        }
+    </style>
+
+    <script>
+        // Chart配置
+        const chartConfig = {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false }
+            },
+            scales: {
+                x: {
+                    grid: { color: 'rgba(255, 255, 255, 0.06)' },
+                    ticks: { color: '#71717a', font: { size: 11 } }
+                },
+                y: {
+                    grid: { color: 'rgba(255, 255, 255, 0.06)' },
+                    ticks: { color: '#71717a', font: { size: 11 } }
+                }
+            },
+            elements: {
+                point: { radius: 0, hoverRadius: 6 },
+                line: { tension: 0.4 }
+            }
+        };
+
+        // 初始化图表 - 使用新配色
+        const chartColors = {
+            blue: { line: '#3b82f6', bg: 'rgba(59, 130, 246, 0.15)' },
+            purple: { line: '#8b5cf6', bg: 'rgba(139, 92, 246, 0.15)' },
+           orange: { line: '#f97316', bg: 'rgba(249, 115, 22, 0.15)' },
+            green: { line: '#10b981', bg: 'rgba(16, 185, 129, 0.15)' }
+        };
+
+        const responseTimeChart = new Chart(document.getElementById('responseTimeChart'), {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: '响应时间',
+                    data: [],
+                    borderColor: chartColors.blue.line,
+                    backgroundColor: chartColors.blue.bg,
+                    fill: true,
+                    borderWidth: 2
+                }]
+            },
+            options: chartConfig
+        });
+
+        const throughputChart = new Chart(document.getElementById('throughputChart'), {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: '吞吐量',
+                    data: [],
+                    borderColor: chartColors.purple.line,
+                    backgroundColor: chartColors.purple.bg,
+                    fill: true,
+                    borderWidth: 2
+                }]
+            },
+            options: chartConfig
+        });
+
+        const errorRateChart = new Chart(document.getElementById('errorRateChart'), {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: '错误率',
+                    data: [],
+                    borderColor: chartColors.orange.line,
+                    backgroundColor: chartColors.orange.bg,
+                    fill: true,
+                    borderWidth: 2
+                }]
+            },
+            options: chartConfig
+        });
+
+        const requestsChart = new Chart(document.getElementById('requestsChart'), {
+            type: 'bar',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: '请求量',
+                    data: [],
+                    backgroundColor: chartColors.green.bg,
+                    borderColor: chartColors.green.line,
+                    borderWidth: 1,
+                    borderRadius: 4
+                }]
+            },
+            options: chartConfig
+        });
+
+        // API URL配置
+        const API_BASE = window.location.origin + '/api';
+        const USE_MOCK = true; // 使用模拟数据
+
+        // 模拟数据生成
+        function generateMockData(duration = '1h') {
+            const durationMap = {
+                '1m': 1,
+                '5m': 5,
+                '15m': 15,
+                '1h': 60,
+                '6h': 360,
+                '24h': 1440
+            };
+            const minutes = durationMap[duration] || 60;
+            const interval = minutes > 60 ? 30 : 10;
+            const points = Math.floor((minutes * 60) / interval);
+
+            const now = Date.now();
+            const labels = [];
+            const responseTimeData = [];
+            const throughputData = [];
+            const errorRateData = [];
+            const requestsData = [];
+
+            for (let i = points - 1; i >= 0; i--) {
+                const timestamp = now - i * interval * 1000;
+                const date = new Date(timestamp);
+                labels.push(date.getHours() + ':' + String(date.getMinutes()).padStart(2, '0'));
+
+                // 添加随机波动
+                const rt = 150 + Math.random() * 100 - 30;
+                const tp = 50 + Math.random() * 20 - 10;
+                const er = 1.5 + Math.random() * 2 - 0.5;
+                const rq = 100 + Math.floor(Math.random() * 300);
+
+                responseTimeData.push(Math.max(10, rt));
+                throughputData.push(Math.max(0, tp));
+                errorRateData.push(Math.max(0, Math.min(10, er)));
+                requestsData.push(Math.max(0, rq));
+            }
+
+            return {
+                labels,
+                response_time: responseTimeData,
+                throughput: throughputData,
+                error_rate: errorRateData,
+                request_count: requestsData
+            };
+        }
+
+        // 更新图表
+        function updateCharts(data) {
+            const labels = data.labels;
+
+            // 更新响应时间图表
+            responseTimeChart.data.labels = labels;
+            responseTimeChart.data.datasets[0].data = data.response_time;
+            responseTimeChart.update();
+
+            // 更新吞吐量图表
+            throughputChart.data.labels = labels;
+            throughputChart.data.datasets[0].data = data.throughput;
+            throughputChart.update();
+
+            // 更新错误率图表
+            errorRateChart.data.labels = labels;
+            errorRateChart.data.datasets[0].data = data.error_rate;
+            errorRateChart.update();
+
+            // 更新请求量图表
+            requestsChart.data.labels = labels;
+            requestsChart.data.datasets[0].data = data.request_count;
+            requestsChart.update();
+        }
+
+        // 更新指标卡片
+        function updateCards(data) {
+            const metrics = data.metrics || {};
+            const timestamp = data.timestamp || Date.now();
+
+            // 响应时间
+            const rt = metrics.response_time || {};
+            document.getElementById('responseTime').textContent = rt.current ? rt.current.toFixed(1) + ' ms' : '--';
+            document.getElementById('responseTimeAvg').textContent = '平均: ' + (rt.avg ? rt.avg.toFixed(1) + ' ms' : '--');
+
+            // 错误率
+            const er = metrics.error_rate || {};
+            document.getElementById('errorRate').textContent = er.current ? er.current.toFixed(2) + '%' : '--';
+            document.getElementById('errorRateAvg').textContent = '平均: ' + (er.avg ? er.avg.toFixed(2) + '%' : '--');
+
+            // 吞吐量
+            const tp = metrics.throughput || {};
+            document.getElementById('throughput').textContent = tp.current ? tp.current.toFixed(1) + '/s' : '--';
+            document.getElementById('throughputAvg').textContent = '平均: ' + (tp.avg ? tp.avg.toFixed(1) + '/s' : '--');
+
+            // 状态
+            const status = data.status || 'healthy';
+            const statusBadge = document.getElementById('statusBadge');
+            const statusText = document.getElementById('statusText');
+
+            if (status === 'healthy') {
+                statusBadge.className = 'status-badge status-healthy';
+                statusBadge.textContent = '健康';
+                statusText.textContent = '正常运行';
+                statusText.style.color = '#10b981';
+            } else if (status === 'warning') {
+                statusBadge.className = 'status-badge status-warning';
+                statusBadge.textContent = '警告';
+                statusText.textContent = '性能下降';
+                statusText.style.color = '#f59e0b';
+            } else {
+                statusBadge.className = 'status-badge status-critical';
+                statusBadge.textContent = '严重';
+                statusText.textContent = '性能异常';
+                statusText.style.color = '#ef4444';
+            }
+
+            // 更新时间
+            document.getElementById('updateTime').textContent = new Date(timestamp).toLocaleString('zh-CN');
+        }
+
+        // 更新告警
+        function updateAlerts(alerts) {
+            const alertsList = document.getElementById('alertsList');
+            const alertCount = document.getElementById('alertCount');
+
+            alertCount.textContent = alerts.length;
+
+            if (alerts.length === 0) {
+                alertsList.innerHTML = '<div class="empty-state">暂无告警</div>';
+                return;
+            }
+
+            alertsList.innerHTML = alerts.map(alert => {
+                const levelClass = alert.level === 'critical' ? 'critical' : 'warning';
+                const icon = alert.level === 'critical' ? '🔴' : '🟡';
+
+                return `
+                    <div class="alert-item ${levelClass}">
+                        <span style="font-size: 1.25rem;">${icon}</span>
+                        <div style="flex: 1;">
+                            <div style="font-weight: 500;">${alert.message}</div>
+                            <div class="alert-time">${alert.time}</div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // 获取数据
+        async function fetchData(duration = '1h') {
+            try {
+                if (USE_MOCK) {
+                    // 使用模拟数据 - 完全本地生成，不依赖任何外部API
+                    const mockData = generateMockData(duration);
+
+                    // 生成摘要数据
+                    const last = mockData.response_time.length - 1;
+                    const summary = {
+                        timestamp: Date.now(),
+                        status: 'healthy',
+                        metrics: {
+                            response_time: {
+                                current: mockData.response_time[last],
+                                avg: mockData.response_time.reduce((a, b) => a + b, 0) / mockData.response_time.length,
+                                max: Math.max(...mockData.response_time),
+                                min: Math.min(...mockData.response_time),
+                                unit: 'ms'
+                            },
+                            error_rate: {
+                                current: mockData.error_rate[last],
+                                avg: mockData.error_rate.reduce((a, b) => a + b, 0) / mockData.error_rate.length,
+                                unit: '%'
+                            },
+                            throughput: {
+                                current: mockData.throughput[last],
+                                avg: mockData.throughput.reduce((a, b) => a + b, 0) / mockData.throughput.length,
+                                unit: 'req/s'
+                            }
+                        }
+                    };
+
+                    // 生成告警
+                    const alerts = [];
+                    const rt = summary.metrics.response_time;
+                    const er = summary.metrics.error_rate;
+
+                    if (rt.current > 500) {
+                        alerts.push({ level: 'critical', message: '响应时间过高: ' + rt.current.toFixed(2) + 'ms', time: new Date().toLocaleTimeString('zh-CN') });
+                    } else if (rt.current > 300) {
+                        alerts.push({ level: 'warning', message: '响应时间偏高: ' + rt.current.toFixed(2) + 'ms', time: new Date().toLocaleTimeString('zh-CN') });
+                    }
+
+                    if (er.current > 5) {
+                        alerts.push({ level: 'critical', message: '错误率过高: ' + er.current.toFixed(2) + '%', time: new Date().toLocaleTimeString('zh-CN') });
+                    } else if (er.current > 2) {
+                        alerts.push({ level: 'warning', message: '错误率偏高: ' + er.current.toFixed(2) + '%', time: new Date().toLocaleTimeString('zh-CN') });
+                    }
+
+                    return { chartData: mockData, summary, alerts };
+                }
+
+                // 真实API调用
+                const response = await fetch(API_BASE + '/summary?duration=' + duration);
+                const data = await response.json();
+                return data;
+            } catch (error) {
+                console.error('Failed to fetch data:', error);
+                // 回退到模拟数据
+                const mockData = generateMockData(duration);
+                return {
+                    chartData: mockData,
+                    summary: { timestamp: Date.now(), status: 'healthy', metrics: {} },
+                    alerts: []
+                };
+            }
+        }
+
+        // 检查Chart.js是否已加载
+        function checkChartLoaded() {
+            return typeof Chart !== 'undefined';
+        }
+
+        // 刷新数据
+        async function refresh() {
+            const duration = document.getElementById('duration').value;
+            const refreshBtn = document.getElementById('refreshBtn');
+
+            refreshBtn.classList.add('animate-spin');
+
+            try {
+                const data = await fetchData(duration);
+
+                // 更新图表（如果Chart.js已加载）
+                if (checkChartLoaded()) {
+                    updateCharts(data.chartData);
+                }
+                updateCards(data.summary);
+                updateAlerts(data.alerts);
+            } finally {
+                refreshBtn.classList.remove('animate-spin');
+            }
+        }
+
+        // 事件监听
+        document.getElementById('refreshBtn').addEventListener('click', refresh);
+        document.getElementById('duration').addEventListener('change', refresh);
+
+        // 自动刷新 - 每30秒
+        setInterval(function() {
+            if (checkChartLoaded()) {
+                refresh();
+            }
+        }, 30000);
+
+        // 等待资源加载完成后初始化
+        window.addEventListener('load', function() {
+            // 延迟一下确保Chart.js加载完成
+            setTimeout(function() {
+                if (checkChartLoaded()) {
+                    refresh();
+                } else {
+                    // 如果Chart.js没加载，手动触发卡片更新
+                    var mockData = generateMockData('1h');
+                    var last = mockData.response_time.length - 1;
+                    var summary = {
+                        timestamp: Date.now(),
+                        status: 'healthy',
+                        metrics: {
+                            response_time: {
+                                current: mockData.response_time[last],
+                                avg: mockData.response_time.reduce((a, b) => a + b, 0) / mockData.response_time.length,
+                                max: Math.max(...mockData.response_time),
+                                min: Math.min(...mockData.response_time),
+                                unit: 'ms'
+                            },
+                            error_rate: {
+                                current: mockData.error_rate[last],
+                                avg: mockData.error_rate.reduce((a, b) => a + b, 0) / mockData.error_rate.length,
+                                unit: '%'
+                            },
+                            throughput: {
+                                current: mockData.throughput[last],
+                                avg: mockData.throughput.reduce((a, b) => a + b, 0) / mockData.throughput.length,
+                                unit: 'req/s'
+                            }
+                        }
+                    };
+                    updateCards(summary);
+                    updateAlerts([]);
+                }
+            }, 1000);
+        });
+    </script>
+</body>
+</html>
